@@ -339,12 +339,23 @@ $("bAdd").onclick=()=>{$("mKhC").innerHTML=`<h4>Thêm khách hàng</h4><div clas
     KH.push(k);writeLog(USER.email,"Thêm KH "+k.ma);closeM("mKh");render();openKH(k)}};
 
 /* ======================= TỐI ƯU & GHÉP LỊCH ======================= */
-function optimise(pts){const P=[PGD,...pts],n=pts.length;let t=[0],u=new Set([0]);
-  while(t.length<=n){let b=-1,bd=1e9;for(let j=1;j<=n;j++)if(!u.has(j)){const d=km(P[t.at(-1)],P[j]);if(d<bd){bd=d;b=j}}t.push(b);u.add(b)}t.push(0);
-  const Ln=x=>x.slice(1).reduce((s,v,i)=>s+km(P[x[i]],P[v]),0);let imp=true;
-  while(imp){imp=false;for(let i=1;i<n;i++)for(let k=i+1;k<=n;k++){const nt=[...t.slice(0,i),...t.slice(i,k+1).reverse(),...t.slice(k+1)];if(Ln(nt)<Ln(t)-1e-9){t=nt;imp=true}}}
-  return{order:t.slice(1,-1).map(i=>P[i]),len:Ln(t)}}
-const naive=pts=>{const P=[PGD,...pts,PGD];return P.slice(1).reduce((s,v,i)=>s+km(P[i],v),0)};
+/* Đường MỞ: xuất phát từ PGD, KHÔNG quay lại PGD – kết thúc ở KH cuối cùng */
+function optimise(pts){const n=pts.length,P=[PGD,...pts];
+  const Ln=x=>x.slice(1).reduce((s,v,i)=>s+km(P[x[i]],P[v]),0);
+  if(n<=1)return{order:pts.slice(),len:n?km(PGD,pts[0]):0};
+  if(n<=10){/* chính xác (Held-Karp) với chuyến nhỏ */
+    const D=P.map(a=>P.map(b=>km(a,b))),N=1<<n,dp=Array.from({length:N},()=>new Float64Array(n).fill(1e18)),par=Array.from({length:N},()=>new Int8Array(n).fill(-1));
+    for(let j=0;j<n;j++)dp[1<<j][j]=D[0][j+1];
+    for(let m=1;m<N;m++)for(let j=0;j<n;j++){if(!(m&(1<<j))||dp[m][j]>=1e18)continue;
+      for(let k=0;k<n;k++){if(m&(1<<k))continue;const nm=m|(1<<k),v=dp[m][j]+D[j+1][k+1];if(v<dp[nm][k]){dp[nm][k]=v;par[nm][k]=j}}}
+    let bj=0,bv=1e18;for(let j=0;j<n;j++)if(dp[N-1][j]<bv){bv=dp[N-1][j];bj=j}
+    const o=[];let m=N-1,j=bj;while(j>=0){o.push(j+1);const pj=par[m][j];m^=(1<<j);j=pj}o.reverse();
+    return{order:o.map(i=>P[i]),len:bv}}
+  let t=[0],u=new Set([0]);/* chuyến lớn: gần nhất + 2-opt trên đường mở */
+  while(t.length<=n){let b=-1,bd=1e9;for(let j=1;j<=n;j++)if(!u.has(j)){const d=km(P[t.at(-1)],P[j]);if(d<bd){bd=d;b=j}}t.push(b);u.add(b)}
+  let imp=true;while(imp){imp=false;for(let i=1;i<n;i++)for(let k=i+1;k<=n;k++){const nt=[...t.slice(0,i),...t.slice(i,k+1).reverse(),...t.slice(k+1)];if(Ln(nt)<Ln(t)-1e-9){t=nt;imp=true}}}
+  return{order:t.slice(1).map(i=>P[i]),len:Ln(t)}}
+const naive=pts=>{const P=[PGD,...pts];return P.slice(1).reduce((s,v,i)=>s+km(P[i],v),0)};
 const dueDay=k=>k.han<today?today:k.han;
 function schedule(){const E=+$("pE").value,R=+$("pR").value,K=+$("pK").value,byRm=$("byRm").checked,G={};
   filtered({st:""}).filter(hasGps).forEach(k=>{const g=byRm?k.rm:"Cả phòng";(G[g]=G[g]||[]).push(k)});const trips=[];
@@ -354,16 +365,16 @@ function schedule(){const E=+$("pE").value,R=+$("pR").value,K=+$("pK").value,byR
         const d=Math.min(...trip.map(p=>km(p,y)));if(d<=R&&d<bd){bd=d;best=y}}if(!best)break;trip.push(best);left=left.filter(z=>z!==best)}
       trips.push({rm:g,day:D,kh:trip})}}
   trips.sort((a,b)=>a.day-b.day||a.rm.localeCompare(b.rm));
-  trips.forEach(t=>{const o=optimise(t.kh);t.order=o.order;t.len=o.len;t.link="https://www.google.com/maps/dir/"+[PGD,...o.order,PGD].map(p=>p.lat+","+p.lng).join("/")});return trips}
+  trips.forEach(t=>{const o=optimise(t.kh);t.order=o.order;t.len=o.len;t.link="https://www.google.com/maps/dir/"+[PGD,...o.order].map(p=>p.lat+","+p.lng).join("/")});return trips}
 const COLORS=["#1565c0","#8e24aa","#00897b","#ef6c00","#6d4c41","#d81b60","#3949ab","#7cb342","#00acc1","#5e35b1"];
 $("bPlan").onclick=()=>{plan=schedule();LR.clearLayers();const f=filtered({st:""}).filter(hasGps);
   const keys=[...new Set(f.map(k=>($("byRm").checked?k.rm:"")+"|"+iso(dueDay(k))))];
   const nKm=keys.reduce((s,key)=>s+naive(f.filter(k=>($("byRm").checked?k.rm:"")+"|"+iso(dueDay(k))===key)),0),tKm=plan.reduce((s,t)=>s+t.len,0);
   let h=`<div class="compare"><b>Kết quả ghép lịch</b><br>Không ghép: <b>${keys.length}</b> chuyến · ~${nKm.toFixed(1)} km<br>Sau ghép + tối ưu: <b>${plan.length}</b> chuyến · ~${tKm.toFixed(1)} km<br>
   Giảm <b>${keys.length-plan.length}</b> chuyến (${keys.length?Math.round(100*(1-plan.length/keys.length)):0}%) · giảm ${nKm?Math.round(100*(1-tKm/nKm)):0}% quãng đường</div>`;
-  plan.forEach((t,i)=>{const c=COLORS[i%COLORS.length];t.color=c;t.line=L.polyline([[PGD.lat,PGD.lng],...t.order.map(p=>[p.lat,p.lng]),[PGD.lat,PGD.lng]],{color:c,weight:4,opacity:.85}).addTo(LR);
+  plan.forEach((t,i)=>{const c=COLORS[i%COLORS.length];t.color=c;t.line=L.polyline([[PGD.lat,PGD.lng],...t.order.map(p=>[p.lat,p.lng])],{color:c,weight:4,opacity:.85}).addTo(LR);
     t.order.forEach((p,j)=>L.marker([p.lat,p.lng],{icon:L.divIcon({className:"",iconSize:[22,22],iconAnchor:[11,11],html:`<div style="background:${c};color:#fff;width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;border:2px solid #fff">${j+1}</div>`})}).on("click",()=>openKH(p)).addTo(LR));
-    h+=`<div class="trip" style="border-left-color:${c}" data-i="${i}"><div class="t">Chuyến ${i+1} · ${fmtS(t.day)} · RM ${esc(t.rm)}</div><div class="m">${t.kh.length} KH · ~${t.len.toFixed(1)} km chim bay</div>
+    h+=`<div class="trip" style="border-left-color:${c}" data-i="${i}"><div class="t">Chuyến ${i+1} · ${fmtS(t.day)} · RM ${esc(t.rm)}</div><div class="m">${t.kh.length} KH · ~${t.len.toFixed(1)} km chim bay · không quay về PGD</div>
     <ol>${t.order.map(p=>`<li>${esc(p.ma)} ${esc(p.ten)} <span class="m">(hạn ${fmtS(p.han)})</span></li>`).join("")}</ol>
     <div class="a"><button class="sm" data-a="qr">QR</button><button class="ghost sm" data-a="msg">Copy tin nhắn Zalo</button><button class="ghost sm" data-a="share">Chia sẻ</button><button class="ghost sm" data-a="go">Google Maps</button></div></div>`});
   $("result").innerHTML=h;writeLog(USER.email,`Ghép lịch: ${plan.length} chuyến`);
@@ -372,7 +383,7 @@ $("bPlan").onclick=()=>{plan=schedule();LR.clearLayers();const f=filtered({st:""
     if(a==="msg")return navigator.clipboard.writeText(tripMsg(t,i)).then(()=>toast("Đã copy – dán vào Zalo để gửi")).catch(()=>prompt("Copy nội dung:",tripMsg(t,i)));
     if(a==="share")return navigator.share?navigator.share({title:"Lịch khảo sát",text:tripMsg(t,i)}).catch(()=>{}):toast("Thiết bị không hỗ trợ – dùng Copy tin nhắn");
     map.fitBounds(t.line.getBounds().pad(.2))})};
-function tripMsg(t,i){return `📋 LỊCH KHẢO SÁT – Chuyến ${i+1}\n📅 Ngày ${fmt(t.day)} · RM ${t.rm}\n`+t.order.map((p,j)=>`${j+1}. ${p.ma} – ${p.ten}${p.moc?" ("+p.moc+")":""}`).join("\n")+`\n🚗 ~${t.len.toFixed(1)} km\n🗺 Chỉ đường: ${t.link}`}
+function tripMsg(t,i){return `📋 LỊCH KHẢO SÁT – Chuyến ${i+1}\n📅 Ngày ${fmt(t.day)} · RM ${t.rm}\n`+t.order.map((p,j)=>`${j+1}. ${p.ma} – ${p.ten}${p.moc?" ("+p.moc+")":""}`).join("\n")+`\n🚗 ~${t.len.toFixed(1)} km (đi một chiều, không quay về PGD)\n🗺 Chỉ đường: ${t.link}`}
 function showQR(t,i){$("qr").innerHTML="";new QRCode($("qr"),{text:t.link,width:230,height:230,correctLevel:QRCode.CorrectLevel.L});$("qrT").textContent=`Chuyến ${i+1} · ${fmt(t.day)} · RM ${t.rm}`;curQR={t,i};openM("mQr")}
 $("qrOpen").onclick=()=>window.open(curQR.t.link,"_blank");
 $("qrDl").onclick=()=>{const c=$("qr").querySelector("canvas"),a=document.createElement("a");a.href=c.toDataURL("image/png");a.download=`QR_Chuyen${curQR.i+1}_${iso(curQR.t.day)}.png`;a.click()};
