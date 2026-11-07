@@ -7,7 +7,7 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
 <script>
 /* =====================================================================
    CẤU HÌNH – CNTT điền các giá trị dưới đây (xem file HuongDan_CNTT.docx)
@@ -21,7 +21,12 @@ const CONFIG = {
   SP_HOST:        "congty.sharepoint.com",  // SharePoint host
   SP_SITE:        "/sites/PGDPhoMoi",       // Đường dẫn site
   SP_FILE:        "KhaoSat/DuLieuKhaoSat.xlsx", // Đường dẫn file Excel trong thư viện Documents
-  PGD: { lat: 21.3060, lng: 105.9360, name: "PGD Phố Mới" }
+  PGD: { lat: 21.3060, lng: 105.9360, name: "PGD Phố Mới" },
+  // --- Tự tìm tọa độ từ địa chỉ ---
+  AREA_SUFFIX:     "Việt Nam",   // Thêm vào cuối địa chỉ khi tìm, ví dụ "Quế Võ, Bắc Ninh, Việt Nam"
+  GOOGLE_MAPS_KEY: "",           // Có key Google Maps => tìm chính xác đến số nhà; để trống => dùng OpenStreetMap (miễn phí, kém chính xác hơn)
+  AUTO_REFRESH_MIN: 2,           // Bản thật: tự đọc lại Excel trên SharePoint mỗi N phút
+  APP_URL: ""                    // Địa chỉ web chính thức (để QR mở thẳng danh sách lộ trình trên điện thoại)
 };
 </script>
 <style>
@@ -46,23 +51,26 @@ label{display:block;font-size:12px;color:var(--mute);margin:7px 0 3px}
 #loginErr{color:var(--red);font-size:13px;margin-top:10px}
 .demo-tag{background:#fff4e5;color:#8a5300;border-radius:6px;padding:6px 9px;font-size:12px;margin-bottom:14px}
 /* header */
-header{background:var(--navy);color:#fff;display:flex;align-items:center;gap:16px;padding:0 18px;height:58px;border-bottom:3px solid var(--red)}
+header{background:var(--navy);color:#fff;display:flex;align-items:center;gap:8px 16px;padding:0 18px;min-height:58px;border-bottom:3px solid var(--red);flex-wrap:wrap;flex-shrink:0}
 header .brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:15px;white-space:nowrap}
 header .lg{width:34px;height:34px;border-radius:7px;background:#fff;color:var(--navy);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800}
-nav{display:flex;gap:2px;margin-left:12px;overflow-x:auto}
+nav{display:flex;gap:2px;margin-left:12px;overflow-x:auto;scrollbar-width:none;min-width:0}
 nav a{color:#c9d6ef;text-decoration:none;padding:19px 14px 16px;font-weight:600;border-bottom:3px solid transparent;margin-bottom:-3px;white-space:nowrap;cursor:pointer}
 nav a.on{color:#fff;border-bottom-color:var(--red)}
 .user{margin-left:auto;display:flex;align-items:center;gap:10px;font-size:13px;white-space:nowrap}
 .av{width:32px;height:32px;border-radius:50%;background:var(--red);display:flex;align-items:center;justify-content:center;font-weight:700}
 .user button{background:transparent;border-color:#6d86b8;padding:5px 10px;font-size:12px}
 /* layout */
-.page{height:calc(100vh - 58px)}
+#app{display:flex;flex-direction:column;height:100vh;height:100dvh}
+.page{flex:1;min-height:0}
 #pMap{display:grid;grid-template-columns:380px 1fr}
+#mapWrap{position:relative;min-height:0}
 aside{background:var(--panel);border-right:1px solid var(--line);overflow:auto;padding:14px}
 .box{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:10px;background:#fff}
 .box h2{font-size:12.5px;margin:0 0 6px;color:var(--navy);text-transform:uppercase;letter-spacing:.03em;display:flex;align-items:center;gap:7px}
 .box h2 .n{background:var(--red);color:#fff;border-radius:50%;width:19px;height:19px;display:inline-flex;align-items:center;justify-content:center;font-size:11px}
-.row{display:grid;grid-template-columns:1fr 1fr;gap:8px}.row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:8px;align-items:end}.row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;align-items:end}
+.row3 label,.row label{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .btns{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
 .quick{display:flex;gap:4px;flex-wrap:wrap;margin-top:6px}
 .quick button{padding:3px 8px;font-size:12px;font-weight:500;background:var(--soft);color:var(--navy2);border-color:transparent}
@@ -97,7 +105,18 @@ h3{color:var(--navy);margin:18px 0 8px}
 .modal h4{margin:0 0 6px;color:var(--navy)}
 #qr{background:#fff;padding:8px;display:inline-block}
 .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--navy);color:#fff;padding:10px 16px;border-radius:8px;z-index:4000;display:none}
-@media (max-width:820px){#pMap{grid-template-columns:1fr;height:auto}#map{height:62vh}aside{border-right:0}header .brand span{display:none}.user .nm{display:none}}
+@media (max-width:1100px){header{padding:6px 14px 0}nav{order:3;width:100%;margin:0 -14px;padding:0 6px}nav a{padding:10px 12px 9px}.user{margin-left:auto}.user .nm{display:none}}
+@media (max-width:820px){#app{height:auto;min-height:100vh}.page{flex:none}#pMap{display:flex;flex-direction:column}#mapWrap{order:-1;height:52vh}
+ aside{border-right:0;border-top:1px solid var(--line)}header{flex-wrap:wrap}header .brand{flex:1;min-width:0}header .brand span{font-size:13.5px;overflow:hidden;text-overflow:ellipsis}.user{gap:6px}.user .av{width:28px;height:28px;font-size:13px}.user button{padding:4px 8px;font-size:11px}.legend{bottom:24px;left:6px;right:6px;font-size:11px;gap:4px 8px;flex-wrap:wrap}.maptools{top:8px;right:8px}
+ .trip .a{display:grid;grid-template-columns:1fr 1fr}.wrap{height:auto}table{display:block;overflow-x:auto;white-space:nowrap}.cards{grid-template-columns:1fr 1fr}}
+.tabs{display:flex;gap:4px;justify-content:center;margin:8px 0}.tabs button{padding:5px 10px;font-size:12px;background:#fff;color:var(--navy2)}.tabs button.on{background:var(--navy2);color:#fff}
+.stop{border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin:6px 0;text-align:left}.stop b{color:var(--navy)}
+.prog{height:6px;background:var(--line);border-radius:3px;overflow:hidden;margin-top:6px}.prog i{display:block;height:100%;background:var(--red);transition:width .3s}
+.help{max-width:900px;margin:0 auto;line-height:1.6}.help h2{color:var(--navy);font-size:20px;margin:0 0 4px}.help .sec{background:#fff;border-radius:10px;padding:14px 18px;margin:12px 0;border-left:5px solid var(--navy2)}
+.help .sec h3{margin:0 0 6px;font-size:16px;display:flex;gap:8px;align-items:center}.help .sec h3 .n{background:var(--red);color:#fff;border-radius:50%;width:24px;height:24px;display:inline-flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0}
+.help ol,.help ul{margin:4px 0;padding-left:22px}.help .tip{background:#fff8e6;border-radius:8px;padding:8px 12px;font-size:13px;margin-top:6px}.help .k{background:var(--soft);border-radius:4px;padding:1px 6px;font-weight:600;color:var(--navy2);white-space:nowrap}
+.help .toc{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0}.help .toc a{background:#fff;border:1px solid var(--line);border-radius:16px;padding:4px 12px;font-size:13px;color:var(--navy2);text-decoration:none}
+.badge{display:inline-block;font-size:10.5px;padding:1px 6px;border-radius:9px;background:#fff4e5;color:#8a5300;margin-left:4px}
 </style>
 </head>
 <body>
@@ -120,7 +139,7 @@ h3{color:var(--navy);margin:18px 0 8px}
 <div id="app" class="hidden">
 <header>
   <div class="brand"><img src="data:image/png;base64,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" alt="Logo" style="width:36px;height:36px;border-radius:50%;background:#fff"><span>Khảo sát KH · PGD Phố Mới</span></div>
-  <nav><a data-p="pMap" class="on">Bản đồ &amp; Lịch</a><a data-p="pRep">Báo cáo</a><a data-p="pLog" id="navLog">Nhật ký truy cập</a></nav>
+  <nav><a data-p="pMap" class="on">Bản đồ &amp; Lịch</a><a data-p="pRep">Báo cáo</a><a data-p="pLog" id="navLog">Nhật ký truy cập</a><a data-p="pHelp">Hướng dẫn</a></nav>
   <div class="user"><div class="nm" style="text-align:right"><div id="uName"></div><div id="uMail" style="font-size:11px;color:#c9d6ef"></div></div><div class="av" id="uAv"></div><button id="btnOut">Đăng xuất</button></div>
 </header>
 
@@ -129,8 +148,9 @@ h3{color:var(--navy);margin:18px 0 8px}
 <aside>
   <div class="box"><h2><span class="n">1</span>Dữ liệu khách hàng</h2>
     <div class="note" id="srcInfo"></div>
-    <div class="btns" id="localBtns"><label class="hidden" for="file"></label><input type="file" id="file" accept=".xlsx" style="font-size:12px"></div>
-    <div class="btns"><button class="ghost sm" id="bReload">Tải lại dữ liệu</button><button class="ghost sm" id="bAdd">+ Thêm KH</button><button class="ghost sm" id="bExportAll">Xuất toàn bộ Excel</button></div>
+    <div class="btns" id="localBtns"><button class="sm" id="bWatch">Chọn file Excel (tự cập nhật)</button><input type="file" id="file" accept=".xlsx" class="hidden"></div>
+    <div id="geoBox" class="hidden"><div class="note" id="geoTxt"></div><div class="prog"><i id="geoBar" style="width:0"></i></div></div>
+    <div class="btns"><button class="ghost sm" id="bReload">Tải lại dữ liệu</button><button class="ghost sm" id="bGeo">Tìm tọa độ từ địa chỉ</button><button class="ghost sm" id="bAdd">+ Thêm KH</button><button class="ghost sm" id="bExportAll">Xuất toàn bộ Excel</button></div>
   </div>
 
   <div class="box"><h2><span class="n">2</span>Lọc trên bản đồ</h2>
@@ -142,16 +162,18 @@ h3{color:var(--navy);margin:18px 0 8px}
   </div>
 
   <div class="box"><h2><span class="n">3</span>Ghép lịch &amp; tối ưu lộ trình</h2>
-    <div class="row3"><div><label>Đi sớm tối đa (ngày)</label><input type="number" id="pE" value="7" min="0"></div><div><label>Bán kính ghép (km)</label><input type="number" id="pR" value="5" step="0.5" min="0.5"></div><div><label>Tối đa KH/chuyến</label><input type="number" id="pK" value="6" min="1"></div></div>
+    <div class="row3"><div><label title="Được đi sớm hơn hạn tối đa bao nhiêu ngày">Đi sớm (ngày)</label><input type="number" id="pE" value="7" min="0"></div><div><label title="Khách hàng cách nhau trong bán kính này thì được ghép">Bán kính (km)</label><input type="number" id="pR" value="5" step="0.5" min="0.5"></div><div><label title="Tối đa số khách hàng một chuyến">KH/chuyến</label><input type="number" id="pK" value="6" min="1"></div></div>
     <label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="byRm" checked style="width:auto">Ghép riêng theo từng RM</label>
+    <label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="pBack" style="width:auto">Tính cả quãng quay về PGD</label>
+    <div class="note">Mặc định: xuất phát từ PGD, đi lần lượt, <b>kết thúc ở KH cuối</b> (không quay về).</div>
     <div class="btns"><button class="red" id="bPlan">Ghép lịch</button><button class="ghost" id="bExport">Xuất lịch Excel</button><button class="ghost" id="bClear">Xóa</button></div>
   </div>
   <div id="result"></div>
 </aside>
-<div style="position:relative">
+<div id="mapWrap">
   <div id="map"></div>
   <div class="maptools"><button class="ghost sm" id="bLayer">Ảnh vệ tinh</button><button class="ghost sm" id="bMe">Vị trí của tôi</button></div>
-  <div class="legend"><span><i class="dot" style="background:var(--red)"></i>Quá hạn</span><span><i class="dot" style="background:var(--amber)"></i>≤3 ngày</span><span><i class="dot" style="background:var(--green)"></i>Còn hạn</span><span><i class="dot" style="background:#9aa3b2"></i>Đã KS</span></div>
+  <div class="legend"><span><i class="dot" style="background:var(--red)"></i>Quá hạn</span><span><i class="dot" style="background:var(--amber)"></i>≤3 ngày</span><span><i class="dot" style="background:var(--green)"></i>Còn hạn</span><span><i class="dot" style="background:#9aa3b2"></i>Đã KS</span><span><i class="dot" style="background:#fff;border:2px dashed #111"></i>Vị trí gần đúng</span></div>
   <div class="pickbar hidden" id="pickbar">Bấm vào bản đồ để đặt vị trí cho <span id="pickName"></span> · <u style="cursor:pointer" id="pickCancel">Hủy</u></div>
 </div>
 </div>
@@ -170,12 +192,104 @@ h3{color:var(--navy);margin:18px 0 8px}
   <div class="cards" id="logKpi"></div>
   <table id="tLog"></table>
 </div></div>
+
+<!-- TAB HƯỚNG DẪN -->
+<div class="page hidden" id="pHelp"><div class="wrap"><div class="help">
+<h2>Hướng dẫn sử dụng</h2>
+<div class="note">Hệ thống quản lý khảo sát khách hàng – PGD Phố Mới. Đọc lần lượt các mục, mỗi mục ứng với một bước trong quy trình.</div>
+<div class="toc"><a href="#h0">Quy trình hằng ngày</a><a href="#h1">1. Dữ liệu</a><a href="#h2">2. Định vị</a><a href="#h3">3. Lọc</a><a href="#h4">4. Ghép lịch</a><a href="#h5">5. QR &amp; gửi lịch</a><a href="#h6">6. Ghi kết quả</a><a href="#h7">7. Báo cáo</a><a href="#h8">Điện thoại</a><a href="#h9">Câu hỏi thường gặp</a></div>
+
+<div class="sec" id="h0"><h3>Quy trình hằng ngày (5 phút)</h3>
+<ol><li>Mở web, <b>đăng nhập</b> bằng email công ty.</li>
+<li>Bấm <span class="k">7 ngày</span> để xem KH sắp đến hạn. Chấm <b style="color:var(--red)">đỏ</b> là quá hạn, <b style="color:var(--amber)">vàng</b> là còn 3 ngày trở xuống.</li>
+<li>Bấm <span class="k">Ghép lịch</span>: hệ thống gom KH gần nhau, có hạn gần nhau thành từng chuyến.</li>
+<li>Ở chuyến cần đi: bấm <span class="k">QR / In phiếu</span> hoặc <span class="k">Copy tin nhắn Zalo</span> để gửi RM, lái xe.</li>
+<li>Đến nơi khảo sát xong: bấm vào KH trên bản đồ, chọn <span class="k">Lưu – Đã khảo sát</span>.</li>
+<li>Cuối ngày lãnh đạo xem tab <b>Báo cáo</b>.</li></ol></div>
+
+<div class="sec" id="h1"><h3><span class="n">1</span>Chuẩn bị danh sách khách hàng (Excel)</h3>
+<p>File Excel có sheet <b>DanhSach</b> với các cột (giữ nguyên tên cột):</p>
+<ul><li><b>Mã KH</b>: mã nội bộ, không trùng.</li>
+<li><b>Tên KH</b>, <b>Địa chỉ</b>: ghi đủ <i>số nhà, ngõ, thôn/đường, xã, huyện, tỉnh</i> để tìm vị trí chính xác.</li>
+<li><b>Vĩ độ</b>, <b>Kinh độ</b>: có thể để trống, hệ thống tự tìm (xem mục 2).</li>
+<li><b>Loại khảo sát</b>: Thẩm định / KT sau vay / KT TSBĐ.</li>
+<li><b>Hạn khảo sát</b>: ngày muộn nhất phải đi (dạng ngày/tháng/năm).</li>
+<li><b>Cán bộ phụ trách</b>: tên RM. Khi bàn giao địa bàn chỉ cần đổi tên ở cột này.</li>
+<li><b>Ghi chú vị trí</b>: mốc nhận biết (cạnh cây xăng, ngõ cổng xanh…), rất hữu ích cho người mới.</li></ul>
+<p><b>Cách nạp:</b> bản chính thức tự đọc file trên SharePoint (tự cập nhật mỗi 2 phút). Khi dùng file trên máy, bấm <span class="k">Chọn file Excel (tự cập nhật)</span>: sau đó mỗi lần sửa và <b>lưu</b> Excel, bản đồ tự cập nhật sau vài giây.</p>
+<div class="tip">⚠️ Không ghi số CCCD, số tài khoản, dư nợ, số điện thoại vào file này.</div></div>
+
+<div class="sec" id="h2"><h3><span class="n">2</span>Định vị khách hàng trên bản đồ</h3>
+<p>Có 3 cách, hệ thống ưu tiên theo thứ tự chính xác:</p>
+<ol><li><b>Tự động từ địa chỉ:</b> KH có địa chỉ mà chưa có tọa độ sẽ được tự tìm khi nạp dữ liệu (hoặc bấm <span class="k">Tìm tọa độ từ địa chỉ</span>). Chấm có <b>viền đứt</b> là vị trí <i>gần đúng</i> (chỉ tìm được đến thôn/đường).</li>
+<li><b>GPS tại nhà KH (chính xác nhất):</b> khi đến nơi, mở web trên điện thoại → bấm vào KH → <span class="k">Lấy vị trí hiện tại (GPS)</span>. Cho phép trình duyệt truy cập vị trí.</li>
+<li><b>Chọn trên bản đồ:</b> bấm vào KH → <span class="k">Chọn trên bản đồ</span> → bấm đúng chỗ nhà KH. Nên bật <span class="k">Ảnh vệ tinh</span> để nhìn rõ nhà cửa.</li></ol>
+<div class="tip">Mỗi KH chỉ cần định vị chính xác <b>một lần</b>; tọa độ được lưu lại cho mọi người dùng chung và cho cán bộ tiếp nhận sau này.</div></div>
+
+<div class="sec" id="h3"><h3><span class="n">3</span>Lọc khách hàng theo thời gian</h3>
+<ul><li>Chọn <b>Từ ngày – Đến ngày</b> hoặc bấm nhanh <span class="k">Hôm nay</span> <span class="k">Ngày mai</span> <span class="k">7 ngày</span> <span class="k">14 ngày</span> <span class="k">30 ngày</span>.</li>
+<li><b>Cán bộ RM</b>: chỉ xem KH của một người. <b>Trạng thái</b>: chưa khảo sát / đã khảo sát / tất cả.</li>
+<li><b>Kèm KH đã quá hạn</b>: luôn hiện KH quá hạn chưa đi, dù ngoài khoảng ngày.</li>
+<li>Màu chấm: <b style="color:var(--red)">đỏ</b> quá hạn · <b style="color:var(--amber)">vàng</b> ≤ 3 ngày · <b style="color:var(--green)">xanh</b> còn hạn · <b style="color:#9aa3b2">xám</b> đã khảo sát. Rê chuột / chạm vào chấm để xem tên KH.</li></ul></div>
+
+<div class="sec" id="h4"><h3><span class="n">4</span>Ghép lịch &amp; tối ưu lộ trình</h3>
+<p>Bấm <span class="k">Ghép lịch</span>. Hệ thống làm như sau:</p>
+<ol><li>Lấy KH <b>gấp nhất</b> (hạn sớm nhất), xếp chuyến vào đúng ngày hạn đó.</li>
+<li>Gom thêm các KH <b>ở gần</b> (trong bán kính) và <b>được phép đi sớm</b> vào cùng chuyến.</li>
+<li>Sắp thứ tự đi ngắn nhất: <b>xuất phát từ PGD, kết thúc ở KH cuối</b> (không quay về). Điểm cuối hiện bằng ô vuông.</li></ol>
+<p><b>Thông số chỉnh được:</b></p>
+<ul><li><b>Đi sớm (ngày)</b>: được đi sớm hơn hạn tối đa bao nhiêu ngày (mặc định 7).</li>
+<li><b>Bán kính (km)</b>: KH cách nhau trong khoảng này thì được ghép (mặc định 5).</li>
+<li><b>KH/chuyến</b>: số KH tối đa một chuyến (mặc định 6; Google Maps nhận tốt tối đa ~9 điểm).</li>
+<li><b>Ghép riêng theo từng RM</b>: bỏ chọn nếu cả phòng đi chung một xe.</li>
+<li><b>Tính cả quãng quay về PGD</b>: bật khi phải về phòng sau khi khảo sát.</li></ul>
+<p>Ô kết quả cho biết số chuyến và số km <b>trước/sau</b> khi ghép – dùng làm số liệu đánh giá hiệu quả. Bấm vào một chuyến để phóng to trên bản đồ.</p></div>
+
+<div class="sec" id="h5"><h3><span class="n">5</span>Mã QR &amp; gửi lịch cho RM / LĐP / lái xe</h3>
+<p>Ở mỗi chuyến:</p>
+<ul><li><span class="k">QR / In phiếu</span> có 3 loại QR:
+ <ul><li><b>Danh sách KH</b>: quét bằng camera điện thoại → hiện thứ tự đi, tên, địa chỉ, mốc nhận biết, link chỉ đường.</li>
+ <li><b>Mở trên web</b>: quét → đăng nhập → danh sách lộ trình có nút chỉ đường và ghi kết quả từng KH (an toàn nhất, chỉ chứa mã KH).</li>
+ <li><b>Google Maps</b>: dẫn đường qua tất cả điểm theo thứ tự.</li></ul></li>
+<li><span class="k">In phiếu lộ trình</span>: tờ A4 có bảng KH, QR chỉ đường từng KH, cột ghi kết quả và chỗ ký.</li>
+<li><span class="k">Copy tin nhắn Zalo</span>: dán vào Zalo là gửi được lịch kèm link chỉ đường. <span class="k">Chia sẻ</span> (trên điện thoại) gửi thẳng qua ứng dụng.</li>
+<li><span class="k">Xuất lịch Excel</span>: lưu toàn bộ lịch để báo cáo.</li></ul>
+<div class="tip">⚠️ Phiếu in và QR "Danh sách KH" có tên, địa chỉ KH – giữ như hồ sơ, không để thất lạc.</div></div>
+
+<div class="sec" id="h6"><h3><span class="n">6</span>Ghi kết quả khảo sát</h3>
+<ol><li>Bấm vào KH trên bản đồ (hoặc trong danh sách lộ trình mở từ QR).</li>
+<li>Chọn ngày, tình trạng <b>sử dụng vốn</b>, tình trạng <b>TSBĐ</b>, ghi chú.</li>
+<li>Bấm <span class="k">Lưu – Đã khảo sát</span>: kết quả tự ghi vào sheet <b>KetQua</b> trong Excel, chấm KH chuyển màu xám.</li></ol>
+<p>Phần <b>Lịch sử</b> trong cửa sổ KH cho xem các lần khảo sát trước.</p></div>
+
+<div class="sec" id="h7"><h3><span class="n">7</span>Báo cáo &amp; nhật ký</h3>
+<ul><li>Tab <b>Báo cáo</b>: chọn kỳ → xem tổng KH đến hạn, đã khảo sát, quá hạn, tỷ lệ hoàn thành theo từng RM, danh sách kết quả.</li>
+<li>Tab <b>Nhật ký truy cập</b> (chỉ lãnh đạo): ai đăng nhập, lúc nào, thao tác gì; có thể tìm kiếm và xuất Excel.</li>
+<li><span class="k">Xuất toàn bộ Excel</span>: tải bản sao lưu gồm danh sách, kết quả, nhật ký.</li></ul></div>
+
+<div class="sec" id="h8"><h3>Dùng trên điện thoại</h3>
+<ul><li>Mở web bằng Chrome/Safari, đăng nhập như trên máy tính. Bản đồ nằm trên, các nút điều khiển ở dưới.</li>
+<li>Thêm vào màn hình chính: Chrome → ⋮ → <i>Thêm vào màn hình chính</i>; Safari → nút Chia sẻ → <i>Thêm vào MH chính</i>.</li>
+<li>Bấm <span class="k">Vị trí của tôi</span> để xem mình đang ở đâu so với KH.</li></ul></div>
+
+<div class="sec" id="h9"><h3>Câu hỏi thường gặp</h3>
+<p><b>Vì sao KH không hiện trên bản đồ?</b> Kiểm tra: hạn khảo sát có trong khoảng ngày đang lọc không; KH đã khảo sát (đổi Trạng thái sang "Tất cả"); KH chưa có tọa độ (ô "chưa tọa độ" &gt; 0) → định vị theo mục 2.</p>
+<p><b>Vị trí tự tìm bị sai?</b> Địa chỉ nông thôn thường chỉ tìm được đến thôn. Dùng GPS hoặc chọn trên bản đồ để sửa – chỉ cần làm một lần.</p>
+<p><b>Số km khác với thực tế?</b> Hệ thống tính đường chim bay để so sánh và sắp thứ tự; đường thực tế xem trên Google Maps khi dẫn đường.</p>
+<p><b>Không đăng nhập được?</b> Chỉ email của đơn vị mới được vào. Liên hệ bộ phận CNTT nếu tài khoản đúng mà vẫn bị từ chối.</p>
+<p><b>Bản đồ trắng / không hiện nền?</b> Kiểm tra kết nối mạng; tải lại trang (F5).</p></div>
+</div></div></div>
+
 </div>
+
 
 <!-- MODAL KHẢO SÁT / KH -->
 <div class="modal" id="mKh"><div class="c" id="mKhC"></div></div>
-<div class="modal" id="mQr"><div class="c" style="text-align:center"><h4 id="qrT"></h4><div id="qr"></div><div class="note">Quét để mở chỉ đường Google Maps</div>
-  <div class="btns" style="justify-content:center"><button class="ghost sm" id="qrDl">Tải ảnh QR</button><button class="ghost sm" id="qrOpen">Mở link</button><button class="sm" onclick="closeM('mQr')">Đóng</button></div></div></div>
+<div class="modal" id="mQr"><div class="c" style="text-align:center"><h4 id="qrT"></h4>
+  <div class="tabs"><button data-m="list" class="on">Danh sách KH</button><button data-m="web">Mở trên web</button><button data-m="map">Google Maps</button></div>
+  <div id="qr"></div><div class="note" id="qrNote"></div>
+  <div class="btns" style="justify-content:center"><button class="ghost sm" id="qrDl">Tải ảnh QR</button><button class="ghost sm" id="qrPrint">In phiếu lộ trình</button><button class="sm" onclick="closeM('mQr')">Đóng</button></div></div></div>
+<div class="modal" id="mTrip"><div class="c" id="mTripC"></div></div>
 <div class="toast" id="toast"></div>
 
 <script>
@@ -244,26 +358,72 @@ async function readSheet(name){const j=await g(`/worksheets('${name}')/usedRange
 async function addRow(table,values){return g(`/tables('${table}')/rows/add`,"POST",{values:[values]})}
 
 /* ======================= NẠP / GHI DỮ LIỆU ======================= */
-const COLS={ma:["makh"],ten:["tenkh","ten"],dc:["diachi"],lat:["vido"],lng:["kinhdo"],loai:["loaikhaosat"],han:["hankhaosat","han"],rm:["canbophutrach","rm"],moc:["ghichuvitri","mocnhanbiet"]};
+const COLS={ma:["makh"],ten:["tenkh","ten"],dc:["diachi"],lat:["vido"],lng:["kinhdo"],loai:["loaikhaosat"],han:["hankhaosat","han"],rm:["canbophutrach","rm"],moc:["ghichuvitri","mocnhanbiet"],src:["nguontoado"]};
 function mapKH(rows){return rows.map((r,i)=>{const o={row:i+2};for(const k in r){const n=norm(k);for(const f in COLS)if(COLS[f].includes(n))o[f]=r[k]}
   o.lat=o.lat===""||o.lat==null?NaN:parseFloat(String(o.lat).replace(",","."));o.lng=o.lng===""||o.lng==null?NaN:parseFloat(String(o.lng).replace(",","."));
   o.han=toDate(o.han);o.rm=o.rm||"(chưa gán)";return o}).filter(o=>o.ma&&o.han)}
 function mapKQ(rows){return rows.map(r=>({tg:r["Thời gian ghi"],ngay:toDate(r["Ngày KS"]),ma:r["Mã KH"],cb:r["Cán bộ KS"],von:r["Sử dụng vốn"],ts:r["Tình trạng TSBĐ"],gc:r["Ghi chú"]})).filter(r=>r.ma&&r.ngay)}
 async function loadData(){
   try{
-    if(DEMO){if(!KH.length){const s=sampleData();KH=s.kh;KQ=s.kq;LOG=s.log}
-      $("srcInfo").innerHTML=`Nguồn: <b>dữ liệu mẫu (demo)</b> · ${KH.length} KH. Có thể chọn file Excel để thử:`}
-    else{const [a,b]=await Promise.all([readSheet("DanhSach"),readSheet("KetQua")]);KH=mapKH(a);KQ=mapKQ(b);
+    if(DEMO){if(!KH.length&&!fileHandle){const s=sampleData();KH=s.kh;KQ=s.kq;LOG=s.log}
+      $("srcInfo").innerHTML=`Nguồn: <b>dữ liệu mẫu (demo)</b> · ${KH.length} KH. Chọn file Excel của bạn – khi sửa và lưu file, bản đồ tự cập nhật:`}
+    else{const [a,b]=await Promise.all([readSheet("DanhSach"),readSheet("KetQua")]);const old=KH;KH=mapKH(a);KH.forEach(k=>{const o=old.find(x=>x.ma===k.ma);if(!hasGps(k)&&o&&hasGps(o)&&o.dc===k.dc){k.lat=o.lat;k.lng=o.lng;k.src=o.src}});KQ=mapKQ(b);
       try{LOG=(await readSheet("NhatKy")).map(r=>({t:parseDT(r["Thời gian"]),email:r["Email"],act:r["Thao tác"]})).filter(l=>l.email).sort((a,b)=>b.t-a.t)}catch(e){LOG=[]}
-      $("srcInfo").innerHTML=`Nguồn: <b>SharePoint</b> · ${esc(CONFIG.SP_FILE)} · ${KH.length} KH`;$("localBtns").classList.add("hidden")}
+      $("srcInfo").innerHTML=`Nguồn: <b>SharePoint</b> · ${esc(CONFIG.SP_FILE)} · ${KH.length} KH · tự cập nhật mỗi ${CONFIG.AUTO_REFRESH_MIN} phút`;$("localBtns").classList.add("hidden")}
   }catch(e){$("srcInfo").innerHTML=`<span style="color:var(--red)">Lỗi đọc dữ liệu: ${esc(e.message)}</span>`}
-  const rms=[...new Set(KH.map(k=>k.rm))].sort();$("rm").innerHTML='<option value="">Tất cả RM</option>'+rms.map(r=>`<option>${esc(r)}</option>`).join("");
-  render();renderReport();renderLog();fit();
+  const rms=[...new Set(KH.map(k=>k.rm))].sort(),cur=$("rm").value;$("rm").innerHTML='<option value="">Tất cả RM</option>'+rms.map(r=>`<option${r===cur?" selected":""}>${esc(r)}</option>`).join("");
+  render();renderReport();renderLog();if(!loadData._fitted){fit();loadData._fitted=1}
+  geocodeMissing();openTripFromHash();
 }
-$("bReload").onclick=async()=>{if(!DEMO){KH=[];}await loadData();toast("Đã tải lại dữ liệu")};
-$("file").onchange=e=>{const f=e.target.files[0];if(!f)return;const rd=new FileReader();rd.onload=ev=>{const wb=XLSX.read(ev.target.result,{type:"array",cellDates:true});
-  KH=mapKH(XLSX.utils.sheet_to_json(wb.Sheets["DanhSach"]||wb.Sheets[wb.SheetNames[0]],{defval:""}));KQ=wb.Sheets["KetQua"]?mapKQ(XLSX.utils.sheet_to_json(wb.Sheets["KetQua"],{defval:""})):[];
-  $("srcInfo").innerHTML=`Nguồn: <b>${esc(f.name)}</b> · ${KH.length} KH`;writeLog(USER.email,"Nạp file "+f.name);loadData()};rd.readAsArrayBuffer(f)};
+$("bReload").onclick=async()=>{if(fileHandle)await readHandle(true);else await loadData();toast("Đã tải lại dữ liệu")};
+$("bGeo").onclick=()=>geocodeMissing(true);
+if(!DEMO&&CONFIG.AUTO_REFRESH_MIN>0)setInterval(()=>{if(USER&&!document.hidden)loadData()},CONFIG.AUTO_REFRESH_MIN*60e3);
+
+/* ---- Theo dõi file Excel trên máy (Chrome/Edge): file được lưu lại => bản đồ tự cập nhật ---- */
+let fileHandle=null,fileMod=0;
+async function readHandle(force){const f=await fileHandle.getFile();if(!force&&f.lastModified===fileMod)return;fileMod=f.lastModified;
+  parseWorkbook(await f.arrayBuffer(),f.name);if(!force)toast("File Excel vừa thay đổi – đã cập nhật bản đồ")}
+$("bWatch").onclick=async()=>{if(!window.showOpenFilePicker)return $("file").click();
+  try{[fileHandle]=await showOpenFilePicker({types:[{description:"Excel",accept:{"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":[".xlsx"]}}]});
+    await readHandle(true);clearInterval(readHandle._t);readHandle._t=setInterval(()=>readHandle(false).catch(()=>{}),5000)}catch(e){}};
+function parseWorkbook(buf,name){const wb=XLSX.read(buf,{type:"array",cellDates:true});
+  const nk=mapKH(XLSX.utils.sheet_to_json(wb.Sheets["DanhSach"]||wb.Sheets[wb.SheetNames[0]],{defval:""}));
+  nk.forEach(k=>{const o=KH.find(x=>x.ma===k.ma);if(!hasGps(k)&&o&&hasGps(o)&&o.dc===k.dc){k.lat=o.lat;k.lng=o.lng;k.src=o.src}}); // giữ tọa độ đã tìm
+  KH=nk;if(wb.Sheets["KetQua"])KQ=mapKQ(XLSX.utils.sheet_to_json(wb.Sheets["KetQua"],{defval:""}));
+  $("srcInfo").innerHTML=`Nguồn: <b>${esc(name)}</b> · ${KH.length} KH${fileHandle?" · <span style='color:var(--green)'>đang theo dõi thay đổi</span>":""}`;
+  writeLog(USER.email,"Nạp file "+name);afterData()}
+function afterData(){const rms=[...new Set(KH.map(k=>k.rm))].sort(),cur=$("rm").value;$("rm").innerHTML='<option value="">Tất cả RM</option>'+rms.map(r=>`<option${r===cur?" selected":""}>${esc(r)}</option>`).join("");
+  render();renderReport();if(!afterData._f){fit();afterData._f=1}geocodeMissing()}
+
+/* ======================= TỰ TÌM TỌA ĐỘ TỪ ĐỊA CHỈ ======================= */
+let geoRunning=false,gGeocoder=null;
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+function cacheGet(a){try{return JSON.parse(localStorage.getItem("geo:"+a))}catch(e){return null}}
+function cacheSet(a,v){try{localStorage.setItem("geo:"+a,JSON.stringify(v))}catch(e){}}
+async function geoGoogle(q){if(!gGeocoder){await loadScript(`https://maps.googleapis.com/maps/api/js?key=${CONFIG.GOOGLE_MAPS_KEY}&language=vi&region=VN`);gGeocoder=new google.maps.Geocoder()}
+  const r=await gGeocoder.geocode({address:q,region:"vn"}).catch(()=>({results:[]}));const x=r.results[0];if(!x)return null;
+  return{lat:x.geometry.location.lat(),lng:x.geometry.location.lng(),approx:x.geometry.location_type!=="ROOFTOP"}}
+async function geoOSM(q){const r=await fetch("https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=vn&accept-language=vi&q="+encodeURIComponent(q));
+  if(!r.ok)throw new Error("OSM "+r.status);const j=await r.json();return j[0]?{lat:+j[0].lat,lng:+j[0].lon}:null}
+async function geocodeOne(addr){const suf=CONFIG.AREA_SUFFIX?", "+CONFIG.AREA_SUFFIX:"";
+  if(CONFIG.GOOGLE_MAPS_KEY){const r=await geoGoogle(addr+suf);return r?{...r,src:r.approx?"Tự động (gần đúng)":"Tự động"}:null}
+  let r=await geoOSM(addr+suf);if(r)return{...r,src:"Tự động"};await sleep(1100);
+  const noNum=addr.replace(/^\s*(số\s*)?[\d\/A-Za-z-]*\d[\d\/A-Za-z-]*\s*,?\s*/i,"").replace(/^(ngõ|ngách|hẻm|kiệt)\s*[\d\/]+\s*,?\s*/i,"");
+  if(noNum&&noNum!==addr){r=await geoOSM(noNum+suf);if(r)return{...r,src:"Tự động (gần đúng)"};await sleep(1100)}
+  const parts=addr.split(",").map(x=>x.trim()).filter(Boolean);
+  for(let n=Math.min(3,parts.length-1);n>=1;n--){r=await geoOSM(parts.slice(-n).join(", ")+suf);if(r)return{...r,src:"Tự động (gần đúng)"};await sleep(1100)}
+  return null}
+async function geocodeMissing(manual){if(geoRunning)return;const need=KH.filter(k=>!hasGps(k)&&k.dc);
+  if(!need.length){if(manual)toast("Tất cả KH có địa chỉ đều đã có tọa độ");return}
+  geoRunning=true;$("geoBox").classList.remove("hidden");let ok=0,fail=[];
+  for(let i=0;i<need.length;i++){const k=need[i];$("geoTxt").innerHTML=`Đang tìm tọa độ từ địa chỉ: <b>${i+1}/${need.length}</b> – ${esc(k.ma)} ${esc(k.dc)}`;$("geoBar").style.width=(100*i/need.length)+"%";
+    let r=cacheGet(k.dc);
+    if(!r){try{r=await geocodeOne(k.dc)}catch(e){r=null;fail.push(k.ma+" (lỗi mạng)");await sleep(1500)}if(r)cacheSet(k.dc,r);if(!CONFIG.GOOGLE_MAPS_KEY)await sleep(1100)}
+    if(r){k.lat=+r.lat.toFixed(6);k.lng=+r.lng.toFixed(6);k.src=r.src;ok++;render();try{await saveGps(k,true)}catch(e){}}else if(!fail.some(x=>x.startsWith(k.ma)))fail.push(k.ma)}
+  $("geoBar").style.width="100%";
+  $("geoTxt").innerHTML=`Đã tự định vị <b>${ok}/${need.length}</b> KH.`+(fail.length?` Không tìm được: ${esc(fail.join(", "))} – mở KH và dùng GPS / chọn trên bản đồ.`:"")+` <br>Chấm viền đứt = vị trí gần đúng, nên xác nhận lại khi đến nơi.`;
+  if(ok)writeLog(USER.email,`Tự định vị ${ok} KH từ địa chỉ`);geoRunning=false;render()}
+$("file").onchange=e=>{const f=e.target.files[0];if(!f)return;f.arrayBuffer().then(b=>parseWorkbook(b,f.name));e.target.value=""};
 
 async function writeLog(email,act){const e={t:new Date(),email,act};LOG.unshift(e);
   if(!DEMO&&USER)try{await addRow("tblNhatKy",[fmtT(e.t),email,act,navigator.userAgent.slice(0,120)])}catch(err){console.warn(err)}
@@ -271,16 +431,17 @@ async function writeLog(email,act){const e={t:new Date(),email,act};LOG.unshift(
 async function saveKQ(r){KQ.push(r);
   if(!DEMO)await addRow("tblKetQua",[fmtT(new Date()),fmt(r.ngay),r.ma,r.cb,r.von,r.ts,r.gc]);
   await writeLog(USER.email,`Ghi kết quả KS ${r.ma}`)}
-async function saveGps(k){
-  if(!DEMO)await g(`/worksheets('DanhSach')/range(address='D${k.row}:E${k.row}')`,"PATCH",{values:[[k.lat,k.lng]]});
-  await writeLog(USER.email,`Cập nhật tọa độ ${k.ma}`)}
+async function saveGps(k,silent){
+  if(!DEMO){await g(`/worksheets('DanhSach')/range(address='D${k.row}:E${k.row}')`,"PATCH",{values:[[k.lat,k.lng]]});
+    await g(`/worksheets('DanhSach')/range(address='J${k.row}')`,"PATCH",{values:[[k.src||""]]}).catch(()=>{})}
+  if(!silent)await writeLog(USER.email,`Cập nhật tọa độ ${k.ma} (${k.src||""})`)}
 
 /* ======================= DỮ LIỆU MẪU ======================= */
 function sampleData(){const rms=["Anh","Hùng","Lan"],loai=["KT sau vay","KT TSBĐ","Thẩm định"],ho=["Nguyễn","Trần","Lê","Phạm","Hoàng","Vũ","Đặng","Bùi","Đỗ","Ngô"],
   tn=["An","Bình","Cường","Dung","Giang","Hà","Khoa","Linh","Minh","Nam","Oanh","Phúc","Quân","Sơn","Thảo","Uyên","Vinh","Xuân","Yến","Tâm","Hiếu","Nga","Phong","Trang","Tú","Lộc","Hạnh","Đức","Hưng","Mai"],
   moc=["Cạnh cây xăng","Đối diện nhà văn hóa","Ngõ cổng xanh","Sau chợ","Xưởng gỗ","Gần trường học","Ao cá đầu làng","Cửa hàng tạp hóa"];
   let s=11;const rnd=()=>(s=(s*9301+49297)%233280)/233280;
-  const kh=Array.from({length:30},(_,i)=>({row:i+2,ma:"KH"+String(i+1).padStart(3,"0"),ten:ho[i%10]+" "+tn[i],dc:"Thôn "+(i%12+1)+", xã mẫu",
+  const kh=Array.from({length:30},(_,i)=>({row:i+2,ma:"KH"+String(i+1).padStart(3,"0"),ten:ho[i%10]+" "+tn[i],dc:"Số "+(5+i*7%90)+", ngõ "+(i%9+1)+", thôn "+(i%12+1)+", xã mẫu",src:i===29?"":"GPS",
     lat:i===29?NaN:+(PGD.lat+(rnd()-.5)*.07).toFixed(5),lng:i===29?NaN:+(PGD.lng+(rnd()-.5)*.08).toFixed(5),loai:loai[i%3],rm:rms[Math.floor(rnd()*3)],moc:moc[i%8],
     han:new Date(today.getTime()+Math.floor(rnd()*20-4)*DAY)}));
   const kq=[0,4,9,15].map(i=>({ngay:new Date(today.getTime()-Math.floor(rnd()*4)*DAY),ma:kh[i].ma,cb:kh[i].rm,von:"Đúng mục đích",ts:"Tốt",gc:"Dữ liệu mẫu"}));
@@ -302,7 +463,7 @@ function fit(){const p=KH.filter(hasGps).map(k=>[k.lat,k.lng]);p.push([PGD.lat,P
 function filtered(opt={}){const f=pIso($("from").value),t=pIso($("to").value),rm=$("rm").value,ov=$("overdue").checked,st=opt.st??$("st").value;
   return KH.filter(k=>(!rm||k.rm===rm)&&((k.han>=f&&k.han<=t)||(ov&&k.han<today&&!isDone(k)))&&(st==="all"||(st==="done"?isDone(k):!isDone(k))))}
 function render(){LP.clearLayers();const f=filtered();
-  f.filter(hasGps).forEach(k=>{const s=status(k);L.circleMarker([k.lat,k.lng],{radius:8,color:"#fff",weight:2,fillColor:stColor[s],fillOpacity:.95}).on("click",()=>openKH(k)).addTo(LP)});
+  f.filter(hasGps).forEach(k=>{const s=status(k),ap=/gần đúng/i.test(k.src||"");L.circleMarker([k.lat,k.lng],{radius:8,color:ap?"#111":"#fff",weight:2,dashArray:ap?"3 3":null,fillColor:stColor[s],fillOpacity:.95}).bindTooltip(`${k.ma} – ${k.ten}`).on("click",()=>openKH(k)).addTo(LP)});
   $("sAll").textContent=f.length;$("sOver").textContent=f.filter(k=>status(k)==="over").length;$("sSoon").textContent=f.filter(k=>status(k)==="soon").length;$("sNoGps").textContent=f.filter(k=>!hasGps(k)).length}
 ["from","to","rm","overdue","st"].forEach(id=>$(id).onchange=render);
 document.querySelectorAll("[data-q]").forEach(b=>b.onclick=()=>{const n=+b.dataset.q;$("from").value=iso(n===1?new Date(today.getTime()+DAY):today);$("to").value=iso(new Date(today.getTime()+n*DAY));render()});
@@ -313,7 +474,7 @@ function openKH(k){const s=status(k),l=lastKS(k),hist=KQ.filter(r=>r.ma===k.ma).
   const gm=hasGps(k)?`https://www.google.com/maps/dir/?api=1&destination=${k.lat},${k.lng}`:"";
   $("mKhC").innerHTML=`<h4>${esc(k.ma)} – ${esc(k.ten)}</h4>
   <div class="note">${esc(k.dc||"")}${k.moc?" · <b>"+esc(k.moc)+"</b>":""}<br>${esc(k.loai||"")} · RM: <b>${esc(k.rm)}</b> · Hạn: <b style="color:${stColor[s]}">${fmt(k.han)}</b><br>
-  Tọa độ: ${hasGps(k)?k.lat+", "+k.lng:"<b style='color:var(--red)'>chưa có</b>"} · Lần KS gần nhất: ${l?fmt(l):"chưa"}</div>
+  Tọa độ: ${hasGps(k)?k.lat+", "+k.lng+(k.src?` <span class="badge">${esc(k.src)}</span>`:""):"<b style='color:var(--red)'>chưa có</b>"} · Lần KS gần nhất: ${l?fmt(l):"chưa"}</div>
   <div class="btns">${gm?`<button class="ghost sm" onclick="window.open('${gm}','_blank')">Chỉ đường</button>`:""}<button class="ghost sm" id="kGps">Lấy vị trí hiện tại (GPS)</button><button class="ghost sm" id="kPick">Chọn trên bản đồ</button></div>
   <h4 style="margin-top:14px">Ghi kết quả khảo sát</h4>
   <div class="row"><div><label>Ngày khảo sát</label><input type="date" id="kNgay" value="${iso(today)}"></div><div><label>Cán bộ KS</label><input id="kCb" value="${esc(USER.name)}"></div></div>
@@ -324,11 +485,11 @@ function openKH(k){const s=status(k),l=lastKS(k),hist=KQ.filter(r=>r.ma===k.ma).
   ${hist.length?`<h4 style="margin-top:14px">Lịch sử</h4>`+hist.map(r=>`<div class="note">${fmt(r.ngay)} · ${esc(r.cb)} · ${esc(r.von)} · ${esc(r.ts)} ${r.gc?"· "+esc(r.gc):""}</div>`).join(""):""}`;
   openM("mKh");
   $("kSave").onclick=async()=>{try{await saveKQ({ngay:pIso($("kNgay").value),ma:k.ma,cb:$("kCb").value,von:$("kVon").value,ts:$("kTs").value,gc:$("kGc").value});closeM("mKh");render();renderReport();toast("Đã lưu kết quả "+k.ma)}catch(e){alert("Lỗi lưu: "+e.message)}};
-  $("kGps").onclick=()=>navigator.geolocation.getCurrentPosition(async p=>{k.lat=+p.coords.latitude.toFixed(6);k.lng=+p.coords.longitude.toFixed(6);await saveGps(k);closeM("mKh");render();toast("Đã lưu tọa độ "+k.ma)},()=>toast("Không lấy được GPS – hãy cho phép định vị"),{enableHighAccuracy:true});
+  $("kGps").onclick=()=>navigator.geolocation.getCurrentPosition(async p=>{k.lat=+p.coords.latitude.toFixed(6);k.lng=+p.coords.longitude.toFixed(6);k.src="GPS";await saveGps(k);closeM("mKh");render();toast("Đã lưu tọa độ "+k.ma)},()=>toast("Không lấy được GPS – hãy cho phép định vị"),{enableHighAccuracy:true});
   $("kPick").onclick=()=>{picking=k;closeM("mKh");$("pickName").textContent=k.ma;$("pickbar").classList.remove("hidden");map.getContainer().style.cursor="crosshair"};
 }
 map.on("click",async e=>{if(!picking)return;const k=picking;picking=null;$("pickbar").classList.add("hidden");map.getContainer().style.cursor="";
-  k.lat=+e.latlng.lat.toFixed(6);k.lng=+e.latlng.lng.toFixed(6);try{await saveGps(k);render();toast("Đã đặt vị trí "+k.ma)}catch(err){alert(err.message)}});
+  k.lat=+e.latlng.lat.toFixed(6);k.lng=+e.latlng.lng.toFixed(6);k.src="Chọn trên bản đồ";try{await saveGps(k);render();toast("Đã đặt vị trí "+k.ma)}catch(err){alert(err.message)}});
 $("pickCancel").onclick=()=>{picking=null;$("pickbar").classList.add("hidden");map.getContainer().style.cursor=""};
 $("bAdd").onclick=()=>{$("mKhC").innerHTML=`<h4>Thêm khách hàng</h4><div class="row"><div><label>Mã KH</label><input id="nMa"></div><div><label>Tên KH</label><input id="nTen"></div></div>
   <label>Địa chỉ</label><input id="nDc"><div class="row"><div><label>Hạn khảo sát</label><input type="date" id="nHan" value="${iso(today)}"></div><div><label>Cán bộ RM</label><input id="nRm" value="${esc(USER.name)}"></div></div>
@@ -339,23 +500,12 @@ $("bAdd").onclick=()=>{$("mKhC").innerHTML=`<h4>Thêm khách hàng</h4><div clas
     KH.push(k);writeLog(USER.email,"Thêm KH "+k.ma);closeM("mKh");render();openKH(k)}};
 
 /* ======================= TỐI ƯU & GHÉP LỊCH ======================= */
-/* Đường MỞ: xuất phát từ PGD, KHÔNG quay lại PGD – kết thúc ở KH cuối cùng */
-function optimise(pts){const n=pts.length,P=[PGD,...pts];
-  const Ln=x=>x.slice(1).reduce((s,v,i)=>s+km(P[x[i]],P[v]),0);
-  if(n<=1)return{order:pts.slice(),len:n?km(PGD,pts[0]):0};
-  if(n<=10){/* chính xác (Held-Karp) với chuyến nhỏ */
-    const D=P.map(a=>P.map(b=>km(a,b))),N=1<<n,dp=Array.from({length:N},()=>new Float64Array(n).fill(1e18)),par=Array.from({length:N},()=>new Int8Array(n).fill(-1));
-    for(let j=0;j<n;j++)dp[1<<j][j]=D[0][j+1];
-    for(let m=1;m<N;m++)for(let j=0;j<n;j++){if(!(m&(1<<j))||dp[m][j]>=1e18)continue;
-      for(let k=0;k<n;k++){if(m&(1<<k))continue;const nm=m|(1<<k),v=dp[m][j]+D[j+1][k+1];if(v<dp[nm][k]){dp[nm][k]=v;par[nm][k]=j}}}
-    let bj=0,bv=1e18;for(let j=0;j<n;j++)if(dp[N-1][j]<bv){bv=dp[N-1][j];bj=j}
-    const o=[];let m=N-1,j=bj;while(j>=0){o.push(j+1);const pj=par[m][j];m^=(1<<j);j=pj}o.reverse();
-    return{order:o.map(i=>P[i]),len:bv}}
-  let t=[0],u=new Set([0]);/* chuyến lớn: gần nhất + 2-opt trên đường mở */
-  while(t.length<=n){let b=-1,bd=1e9;for(let j=1;j<=n;j++)if(!u.has(j)){const d=km(P[t.at(-1)],P[j]);if(d<bd){bd=d;b=j}}t.push(b);u.add(b)}
-  let imp=true;while(imp){imp=false;for(let i=1;i<n;i++)for(let k=i+1;k<=n;k++){const nt=[...t.slice(0,i),...t.slice(i,k+1).reverse(),...t.slice(k+1)];if(Ln(nt)<Ln(t)-1e-9){t=nt;imp=true}}}
-  return{order:t.slice(1).map(i=>P[i]),len:Ln(t)}}
-const naive=pts=>{const P=[PGD,...pts];return P.slice(1).reduce((s,v,i)=>s+km(P[i],v),0)};
+function optimise(pts){const P=[PGD,...pts],n=pts.length;let t=[0],u=new Set([0]);
+  while(t.length<=n){let b=-1,bd=1e9;for(let j=1;j<=n;j++)if(!u.has(j)){const d=km(P[t.at(-1)],P[j]);if(d<bd){bd=d;b=j}}t.push(b);u.add(b)}const back=$("pBack").checked;if(back)t.push(0);
+  const Ln=x=>x.slice(1).reduce((s,v,i)=>s+km(P[x[i]],P[v]),0);let imp=true;
+  while(imp){imp=false;for(let i=1;i<n;i++)for(let k=i+1;k<=n;k++){const nt=[...t.slice(0,i),...t.slice(i,k+1).reverse(),...t.slice(k+1)];if(Ln(nt)<Ln(t)-1e-9){t=nt;imp=true}}}
+  return{order:(back?t.slice(1,-1):t.slice(1)).map(i=>P[i]),len:Ln(t),back}}
+const naive=pts=>{const P=$("pBack").checked?[PGD,...pts,PGD]:[PGD,...pts];return P.slice(1).reduce((s,v,i)=>s+km(P[i],v),0)};
 const dueDay=k=>k.han<today?today:k.han;
 function schedule(){const E=+$("pE").value,R=+$("pR").value,K=+$("pK").value,byRm=$("byRm").checked,G={};
   filtered({st:""}).filter(hasGps).forEach(k=>{const g=byRm?k.rm:"Cả phòng";(G[g]=G[g]||[]).push(k)});const trips=[];
@@ -365,33 +515,69 @@ function schedule(){const E=+$("pE").value,R=+$("pR").value,K=+$("pK").value,byR
         const d=Math.min(...trip.map(p=>km(p,y)));if(d<=R&&d<bd){bd=d;best=y}}if(!best)break;trip.push(best);left=left.filter(z=>z!==best)}
       trips.push({rm:g,day:D,kh:trip})}}
   trips.sort((a,b)=>a.day-b.day||a.rm.localeCompare(b.rm));
-  trips.forEach(t=>{const o=optimise(t.kh);t.order=o.order;t.len=o.len;t.link="https://www.google.com/maps/dir/"+[PGD,...o.order].map(p=>p.lat+","+p.lng).join("/")});return trips}
+  trips.forEach(t=>{const o=optimise(t.kh);t.order=o.order;t.len=o.len;t.back=o.back;t.link="https://www.google.com/maps/dir/"+(o.back?[PGD,...o.order,PGD]:[PGD,...o.order]).map(p=>p.lat+","+p.lng).join("/")});return trips}
 const COLORS=["#1565c0","#8e24aa","#00897b","#ef6c00","#6d4c41","#d81b60","#3949ab","#7cb342","#00acc1","#5e35b1"];
 $("bPlan").onclick=()=>{plan=schedule();LR.clearLayers();const f=filtered({st:""}).filter(hasGps);
   const keys=[...new Set(f.map(k=>($("byRm").checked?k.rm:"")+"|"+iso(dueDay(k))))];
   const nKm=keys.reduce((s,key)=>s+naive(f.filter(k=>($("byRm").checked?k.rm:"")+"|"+iso(dueDay(k))===key)),0),tKm=plan.reduce((s,t)=>s+t.len,0);
   let h=`<div class="compare"><b>Kết quả ghép lịch</b><br>Không ghép: <b>${keys.length}</b> chuyến · ~${nKm.toFixed(1)} km<br>Sau ghép + tối ưu: <b>${plan.length}</b> chuyến · ~${tKm.toFixed(1)} km<br>
   Giảm <b>${keys.length-plan.length}</b> chuyến (${keys.length?Math.round(100*(1-plan.length/keys.length)):0}%) · giảm ${nKm?Math.round(100*(1-tKm/nKm)):0}% quãng đường</div>`;
-  plan.forEach((t,i)=>{const c=COLORS[i%COLORS.length];t.color=c;t.line=L.polyline([[PGD.lat,PGD.lng],...t.order.map(p=>[p.lat,p.lng])],{color:c,weight:4,opacity:.85}).addTo(LR);
-    t.order.forEach((p,j)=>L.marker([p.lat,p.lng],{icon:L.divIcon({className:"",iconSize:[22,22],iconAnchor:[11,11],html:`<div style="background:${c};color:#fff;width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;border:2px solid #fff">${j+1}</div>`})}).on("click",()=>openKH(p)).addTo(LR));
-    h+=`<div class="trip" style="border-left-color:${c}" data-i="${i}"><div class="t">Chuyến ${i+1} · ${fmtS(t.day)} · RM ${esc(t.rm)}</div><div class="m">${t.kh.length} KH · ~${t.len.toFixed(1)} km chim bay · không quay về PGD</div>
-    <ol>${t.order.map(p=>`<li>${esc(p.ma)} ${esc(p.ten)} <span class="m">(hạn ${fmtS(p.han)})</span></li>`).join("")}</ol>
-    <div class="a"><button class="sm" data-a="qr">QR</button><button class="ghost sm" data-a="msg">Copy tin nhắn Zalo</button><button class="ghost sm" data-a="share">Chia sẻ</button><button class="ghost sm" data-a="go">Google Maps</button></div></div>`});
+  plan.forEach((t,i)=>{const c=COLORS[i%COLORS.length];t.color=c;t.line=L.polyline([[PGD.lat,PGD.lng],...t.order.map(p=>[p.lat,p.lng]),...(t.back?[[PGD.lat,PGD.lng]]:[])],{color:c,weight:4,opacity:.85}).addTo(LR);
+    t.order.forEach((p,j)=>L.marker([p.lat,p.lng],{icon:L.divIcon({className:"",iconSize:[22,22],iconAnchor:[11,11],html:`<div style="background:${c};color:#fff;width:22px;height:22px;border-radius:${!t.back&&j===t.order.length-1?"4px":"50%"};display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;border:2px solid #fff">${j+1}</div>`})}).on("click",()=>openKH(p)).addTo(LR));
+    h+=`<div class="trip" style="border-left-color:${c}" data-i="${i}"><div class="t">Chuyến ${i+1} · ${fmtS(t.day)} · RM ${esc(t.rm)}</div><div class="m">${t.kh.length} KH · ~${t.len.toFixed(1)} km chim bay · PGD → … → ${t.back?"PGD":"kết thúc tại "+esc(t.order.at(-1).ma)}</div>
+    <ol>${t.order.map(p=>`<li>${esc(p.ma)} ${esc(p.ten)} <span class="m">(hạn ${fmtS(p.han)})</span><div class="m">${esc(p.dc||"")}</div></li>`).join("")}</ol>
+    <div class="a"><button class="sm" data-a="qr">QR / In phiếu</button><button class="ghost sm" data-a="msg">Copy tin nhắn Zalo</button><button class="ghost sm" data-a="share">Chia sẻ</button><button class="ghost sm" data-a="go">Google Maps</button></div></div>`});
   $("result").innerHTML=h;writeLog(USER.email,`Ghép lịch: ${plan.length} chuyến`);
   document.querySelectorAll(".trip").forEach(el=>el.onclick=e=>{const i=+el.dataset.i,t=plan[i],a=e.target.dataset.a;
     if(a==="qr")return showQR(t,i);if(a==="go")return window.open(t.link,"_blank");
     if(a==="msg")return navigator.clipboard.writeText(tripMsg(t,i)).then(()=>toast("Đã copy – dán vào Zalo để gửi")).catch(()=>prompt("Copy nội dung:",tripMsg(t,i)));
     if(a==="share")return navigator.share?navigator.share({title:"Lịch khảo sát",text:tripMsg(t,i)}).catch(()=>{}):toast("Thiết bị không hỗ trợ – dùng Copy tin nhắn");
     map.fitBounds(t.line.getBounds().pad(.2))})};
-function tripMsg(t,i){return `📋 LỊCH KHẢO SÁT – Chuyến ${i+1}\n📅 Ngày ${fmt(t.day)} · RM ${t.rm}\n`+t.order.map((p,j)=>`${j+1}. ${p.ma} – ${p.ten}${p.moc?" ("+p.moc+")":""}`).join("\n")+`\n🚗 ~${t.len.toFixed(1)} km (đi một chiều, không quay về PGD)\n🗺 Chỉ đường: ${t.link}`}
-function showQR(t,i){$("qr").innerHTML="";new QRCode($("qr"),{text:t.link,width:230,height:230,correctLevel:QRCode.CorrectLevel.L});$("qrT").textContent=`Chuyến ${i+1} · ${fmt(t.day)} · RM ${t.rm}`;curQR={t,i};openM("mQr")}
-$("qrOpen").onclick=()=>window.open(curQR.t.link,"_blank");
-$("qrDl").onclick=()=>{const c=$("qr").querySelector("canvas"),a=document.createElement("a");a.href=c.toDataURL("image/png");a.download=`QR_Chuyen${curQR.i+1}_${iso(curQR.t.day)}.png`;a.click()};
+function tripMsg(t,i){return `📋 LỊCH KHẢO SÁT – Chuyến ${i+1}\n📅 Ngày ${fmt(t.day)} · RM ${t.rm}\n`+t.order.map((p,j)=>`${j+1}. ${p.ma} – ${p.ten}\n   📍 ${p.dc||""}${p.moc?" ("+p.moc+")":""}`).join("\n")+`\n🚗 ~${t.len.toFixed(1)} km\n🗺 Chỉ đường: ${t.link}`}
+const appUrl=()=>CONFIG.APP_URL||(/^https?:/.test(location.protocol)?location.origin+location.pathname:"");
+const tripUrl=t=>appUrl()+"#trip="+encodeURIComponent(iso(t.day)+"|"+t.rm+"|"+t.order.map(p=>p.ma).join(","));
+function qrText(t,i,short){let s=`LO TRINH KHAO SAT - Chuyen ${i+1}\nNgay ${fmt(t.day)} - RM ${t.rm}\n`+t.order.map((p,j)=>`${j+1}. ${p.ma} ${p.ten}\n   ${p.dc||""}${!short&&p.moc?" ("+p.moc+")":""}`).join("\n")+`\nChi duong: ${t.link}`;return s}
+function qrTextVN(t,i){let s=`LỘ TRÌNH KHẢO SÁT – Chuyến ${i+1}\nNgày ${fmt(t.day)} – RM ${t.rm}\n`+t.order.map((p,j)=>`${j+1}. ${p.ma} – ${p.ten}\n   ${p.dc||""}${p.moc?" ("+p.moc+")":""}`).join("\n")+`\nChỉ đường: ${t.link}`;
+  if(new TextEncoder().encode(s).length>1500)s=s.replace(/ \([^)]*\)/g,"");return s}
+function qrUrl(text){const q=qrcode(0,"L");q.addData(unescape(encodeURIComponent(text)),"Byte");q.make();return q.createDataURL(6,4)}
+function makeQR(el,text,size){el.innerHTML=`<img src="${qrUrl(text)}" width="${size}" height="${size}" style="image-rendering:pixelated">`}
+function drawQR(){const{t,i,m}=curQR;document.querySelectorAll("#mQr .tabs button").forEach(b=>b.classList.toggle("on",b.dataset.m===m));
+  const web=appUrl();let txt,note;
+  if(m==="list"){txt=qrTextVN(t,i);note="Điện thoại quét → hiện ngay <b>danh sách KH, địa chỉ, thứ tự đi</b> và link chỉ đường. Không cần mạng để đọc danh sách."}
+  else if(m==="web"){if(!web){$("qr").innerHTML="";$("qrNote").innerHTML="Cần đặt web lên địa chỉ https nội bộ (điền <b>APP_URL</b> trong cấu hình) thì QR này mới dùng được. Hiện dùng tab <b>Danh sách KH</b>.";return}
+    txt=tripUrl(t);note="Quét → đăng nhập tài khoản công ty → mở danh sách lộ trình, bấm từng KH để chỉ đường và <b>ghi kết quả</b>. QR chỉ chứa mã KH nên an toàn hơn."}
+  else{txt=t.link;note="Quét → Google Maps dẫn đường qua tất cả điểm theo thứ tự tối ưu."}
+  try{makeQR($("qr"),txt,250)}catch(e){makeQR($("qr"),qrText(t,i,true),250)}$("qrNote").innerHTML=note}
+function showQR(t,i){curQR={t,i,m:"list"};$("qrT").textContent=`Chuyến ${i+1} · ${fmt(t.day)} · RM ${t.rm}`;openM("mQr");drawQR()}
+document.querySelectorAll("#mQr .tabs button").forEach(b=>b.onclick=()=>{curQR.m=b.dataset.m;drawQR()});
+const qrDataUrl=text=>qrUrl(text);
+$("qrPrint").onclick=()=>{const{t,i}=curQR,w=window.open("","_blank");if(!w)return toast("Trình duyệt chặn cửa sổ mới");
+  const rows=t.order.map((p,j)=>`<tr><td class="n">${j+1}</td><td><b>${esc(p.ma)}</b><br>${esc(p.ten)}</td><td>${esc(p.dc||"")}${p.moc?`<br><i>${esc(p.moc)}</i>`:""}</td><td>${fmt(p.han)}</td><td><img src="${qrDataUrl(`https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lng}`,110)}" width="80"></td><td class="kq"></td></tr>`).join("");
+  w.document.write(`<!doctype html><html lang="vi"><head><meta charset="utf-8"><title>Phiếu lộ trình</title><style>body{font-family:"Times New Roman",serif;margin:24px;color:#111}h1{font-size:20px;margin:0;color:#0a2e6e}table{width:100%;border-collapse:collapse;margin-top:12px;font-size:14px}th,td{border:1px solid #888;padding:6px;vertical-align:top}th{background:#0a2e6e;color:#fff}td.n{text-align:center;font-weight:bold;width:28px}td.kq{width:140px}.top{display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid #d7182a;padding-bottom:10px}.sig{display:flex;justify-content:space-around;margin-top:30px;text-align:center}@media print{button{display:none}}</style></head><body>
+  <div class="top"><div><h1>PHIẾU LỘ TRÌNH KHẢO SÁT – CHUYẾN ${i+1}</h1><div>${esc(PGD.name)} · Ngày đi: <b>${fmt(t.day)}</b> · RM: <b>${esc(t.rm)}</b> · ${t.kh.length} khách hàng · ~${t.len.toFixed(1)} km</div></div>
+  <div style="text-align:center;font-size:11px"><img src="${qrDataUrl(t.link,140)}" width="110"><br>Quét: cả lộ trình</div></div>
+  <table><tr><th>#</th><th>Khách hàng</th><th>Địa chỉ / mốc nhận biết</th><th>Hạn</th><th>Chỉ đường</th><th>Kết quả</th></tr>${rows}</table>
+  <div class="sig"><div>Cán bộ khảo sát<br><br><br><br></div><div>Lãnh đạo phòng<br><br><br><br></div></div>
+  <button onclick="print()" style="margin-top:10px;padding:8px 16px">In phiếu</button></body></html>`);w.document.close();writeLog(USER.email,`In phiếu lộ trình chuyến ${i+1}`)};
+
+/* ---- Mở danh sách lộ trình từ QR (#trip=...) ---- */
+try{if(/^#trip=/.test(location.hash))sessionStorage.setItem("pendingTrip",location.hash)}catch(e){}
+function openTripFromHash(){let h=location.hash;try{h=h||sessionStorage.getItem("pendingTrip")||"";sessionStorage.removeItem("pendingTrip")}catch(e){}const m=h.match(/^#trip=(.+)$/);if(!m||!KH.length||openTripFromHash._done)return;openTripFromHash._done=1;
+  const[d,rm,codes]=decodeURIComponent(m[1]).split("|");const stops=(codes||"").split(",").map(c=>KH.find(k=>k.ma===c)).filter(Boolean);
+  const link="https://www.google.com/maps/dir/"+[PGD,...stops.filter(hasGps)].map(p=>p.lat+","+p.lng).join("/");
+  $("mTripC").innerHTML=`<h4>Lộ trình ngày ${fmt(pIso(d))} · RM ${esc(rm)}</h4><div class="note">${stops.length} khách hàng · bấm "Ghi kết quả" sau khi khảo sát</div>
+  <button class="red" style="width:100%;margin:8px 0" onclick="window.open('${link}','_blank')">Chỉ đường cả lộ trình</button>
+  ${stops.map((p,j)=>`<div class="stop"><b>${j+1}. ${esc(p.ma)} – ${esc(p.ten)}</b>${isDone(p)?' <span class="badge" style="background:#e3f3e5;color:#2e7d32">Đã KS</span>':""}<div class="note">${esc(p.dc||"")}${p.moc?" · "+esc(p.moc):""}</div>
+  <div class="btns">${hasGps(p)?`<button class="ghost sm" onclick="window.open('https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lng}','_blank')">Chỉ đường</button>`:""}<button class="sm" data-k="${esc(p.ma)}">Ghi kết quả</button></div></div>`).join("")}
+  <div class="btns"><button class="ghost" onclick="closeM('mTrip')">Đóng</button></div>`;
+  $("mTripC").querySelectorAll("[data-k]").forEach(b=>b.onclick=()=>{closeM("mTrip");openKH(KH.find(k=>k.ma===b.dataset.k))});
+  openM("mTrip");writeLog(USER.email,"Mở lộ trình từ QR ("+stops.length+" KH)")}
+$("qrDl").onclick=()=>{const c=$("qr").querySelector("img");if(!c)return;const a=document.createElement("a");a.href=c.src;a.download=`QR_Chuyen${curQR.i+1}_${iso(curQR.t.day)}.gif`;a.click()};
 $("bClear").onclick=()=>{plan=[];LR.clearLayers();$("result").innerHTML=""};
 function xlsxDl(sheets,name){const wb=XLSX.utils.book_new();for(const s in sheets){const ws=XLSX.utils.json_to_sheet(sheets[s],{cellDates:true});XLSX.utils.book_append_sheet(wb,ws,s)}XLSX.writeFile(wb,name)}
-$("bExport").onclick=()=>{if(!plan.length)return toast("Bấm Ghép lịch trước");const rows=[];plan.forEach((t,i)=>t.order.forEach((p,j)=>rows.push({"Chuyến":i+1,"Ngày đi":fmt(t.day),"RM":t.rm,"Thứ tự":j+1,"Mã KH":p.ma,"Tên KH":p.ten,"Mốc nhận biết":p.moc||"","Hạn":fmt(p.han),"Km chuyến":+t.len.toFixed(1),"Link Google Maps":j===0?t.link:""})));
+$("bExport").onclick=()=>{if(!plan.length)return toast("Bấm Ghép lịch trước");const rows=[];plan.forEach((t,i)=>t.order.forEach((p,j)=>rows.push({"Chuyến":i+1,"Ngày đi":fmt(t.day),"RM":t.rm,"Thứ tự":j+1,"Mã KH":p.ma,"Tên KH":p.ten,"Địa chỉ":p.dc||"","Mốc nhận biết":p.moc||"","Hạn":fmt(p.han),"Km chuyến":+t.len.toFixed(1),"Link Google Maps":j===0?t.link:""})));
   xlsxDl({LichKhaoSat:rows},`LichKhaoSat_${iso(today)}.xlsx`);writeLog(USER.email,"Xuất lịch Excel")};
-$("bExportAll").onclick=()=>{xlsxDl({DanhSach:KH.map(k=>({"Mã KH":k.ma,"Tên KH":k.ten,"Địa chỉ":k.dc||"","Vĩ độ":hasGps(k)?k.lat:"","Kinh độ":hasGps(k)?k.lng:"","Loại khảo sát":k.loai||"","Hạn khảo sát":fmt(k.han),"Cán bộ phụ trách":k.rm,"Ghi chú vị trí":k.moc||""})),
+$("bExportAll").onclick=()=>{xlsxDl({DanhSach:KH.map(k=>({"Mã KH":k.ma,"Tên KH":k.ten,"Địa chỉ":k.dc||"","Vĩ độ":hasGps(k)?k.lat:"","Kinh độ":hasGps(k)?k.lng:"","Loại khảo sát":k.loai||"","Hạn khảo sát":fmt(k.han),"Cán bộ phụ trách":k.rm,"Ghi chú vị trí":k.moc||"","Nguồn tọa độ":k.src||""})),
   KetQua:KQ.map(r=>({"Ngày KS":fmt(r.ngay),"Mã KH":r.ma,"Cán bộ KS":r.cb,"Sử dụng vốn":r.von,"Tình trạng TSBĐ":r.ts,"Ghi chú":r.gc||""})),NhatKy:LOG.map(l=>({"Thời gian":fmtT(l.t),"Email":l.email,"Thao tác":l.act}))},`DuLieuKhaoSat_${iso(today)}.xlsx`);writeLog(USER.email,"Xuất toàn bộ Excel")};
 
 /* ======================= BÁO CÁO ======================= */
@@ -417,9 +603,10 @@ $("bLogX").onclick=()=>xlsxDl({NhatKy:LOG.map(l=>({"Thời gian":fmtT(l.t),"Emai
 
 /* ======================= ĐIỀU HƯỚNG ======================= */
 document.querySelectorAll("nav a").forEach(a=>a.onclick=()=>{document.querySelectorAll("nav a").forEach(x=>x.classList.toggle("on",x===a));
-  ["pMap","pRep","pLog"].forEach(p=>$(p).classList.toggle("hidden",p!==a.dataset.p));if(a.dataset.p==="pMap")setTimeout(()=>map.invalidateSize(),50)});
+  ["pMap","pRep","pLog","pHelp"].forEach(p=>$(p).classList.toggle("hidden",p!==a.dataset.p));if(a.dataset.p==="pMap")setTimeout(()=>map.invalidateSize(),50)});
 $("from").value=iso(today);$("to").value=iso(new Date(today.getTime()+14*DAY));
 $("rFrom").value=iso(new Date(today.getFullYear(),today.getMonth(),1));$("rTo").value=iso(new Date(today.getTime()+14*DAY));
+document.querySelectorAll(".help .toc a").forEach(a=>a.onclick=e=>{e.preventDefault();document.querySelector(a.getAttribute("href")).scrollIntoView({behavior:"smooth"})});
 initAuth();
 </script>
 </body>
